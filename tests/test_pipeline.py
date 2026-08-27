@@ -132,3 +132,20 @@ class TestSplitLongTurn:
         assert [ev.speaker_id for ev in events] == [0, 1]
         assert events[0].start == pytest.approx(0.0)
         assert events[0].end == pytest.approx(2.0, abs=0.05)
+        assert all(ev.text == "" for ev in events)  # 未启用 ASR
+
+    def test_events_carry_asr_text(self):
+        """启用 asr 时，事件 text 字段携带识别结果。"""
+        clustering = FakeClustering()
+
+        class FakeAsr:
+            def recognize(self, samples):
+                return "你好世界"
+
+        pipe = Pipeline(vad=None, embedder=FakeEmbedder(), clustering=clustering,
+                        asr=FakeAsr(), max_turn_seconds=6.0, change_threshold=0.6)
+        pipe.vad = FakeVad([Turn(start=0.0, end=2.0, samples=sine(F1, 2.0))])
+        pipe.finish()
+        events = pipe.events()
+        assert len(events) == 1
+        assert events[0].text == "你好世界"
