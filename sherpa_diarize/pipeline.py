@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from sherpa_diarize.asr import Asr
 from sherpa_diarize.clustering import OnlineClustering
 from sherpa_diarize.embedding import SpeakerEmbedder
 from sherpa_diarize.vad import Turn, Vad
@@ -19,12 +20,13 @@ __all__ = ["DiarizationEvent", "Pipeline"]
 
 @dataclass
 class DiarizationEvent:
-    """一个说话人 turn 事件。start/end 为相对流起点的秒数。"""
+    """一个说话人 turn 事件。start/end 为相对流起点的秒数，text 为该段 ASR 转写（未启用 ASR 时为空）。"""
 
     start: float
     end: float
     speaker_id: int
     confidence: float
+    text: str = ""
 
     def to_rttm(self, filename: str = "audio") -> str:
         """转 RTTM 行（SPEAKER 类型）。"""
@@ -75,11 +77,13 @@ class Pipeline:
         vad: Vad,
         embedder: SpeakerEmbedder,
         clustering: OnlineClustering,
+        asr: Asr | None = None,
         max_turn_seconds: float = 6.0,
         change_threshold: float = 0.6,
     ) -> None:
         """Args:
           vad / embedder / clustering: 三个构件。
+          asr: 可选。提供时对每个 turn 同步做 ASR 转写，写入事件 text 字段。
           max_turn_seconds: 超过该时长的 turn 内部做说话人变化检测（滑动窗口
             embedding 序列找相似度骤降点）后切分，避免两人快速交替时混合成一个 turn。
           change_threshold: 相邻窗口 embedding 余弦相似度低于该值视为说话人切换点。
@@ -87,6 +91,7 @@ class Pipeline:
         self.vad = vad
         self.embedder = embedder
         self.clustering = clustering
+        self.asr = asr
         self.max_turn_seconds = max_turn_seconds
         self.change_threshold = change_threshold
         self._events: list[DiarizationEvent] = []
@@ -196,12 +201,14 @@ class Pipeline:
                     # 语音过短无法提 embedding：丢弃（VAD 已按 min_speech_duration 过滤，极少发生）
                     continue
                 sid, conf = self.clustering.assign(emb)
+                text = self.asr.recognize(st.samples) if self.asr else ""
                 self._events.append(
                     DiarizationEvent(
                         start=st.start,
                         end=st.end,
                         speaker_id=self.clustering.resolve(sid),
                         confidence=conf,
+                        text=text,
                     )
                 )
 
@@ -213,6 +220,7 @@ class Pipeline:
                 end=e.end,
                 speaker_id=self.clustering.resolve(e.speaker_id),
                 confidence=e.confidence,
+                text=e.text,
             )
             for e in self._events
         ]
