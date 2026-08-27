@@ -93,6 +93,13 @@ python3 examples/diarize_mic.py \
     --asr-tokens models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/tokens.txt
 ```
 
+Web 可视化前端（需 `uv sync --extra web`）：
+
+```bash
+uv run python3 examples/web/server.py --port 8000
+# 浏览器打开 http://localhost:8000：选音频与 ASR 模式，实时查看说话人时间轴与转写
+```
+
 ### 4. 示例输出
 
 ```
@@ -143,7 +150,10 @@ sherpa-diarize/
 │   └── download_models.py   # 下载 VAD / embedding 模型与 demo 音频
 ├── examples/
 │   ├── diarize_file.py      # 文件回放（实时模拟）
-│   └── diarize_mic.py       # 麦克风实时
+│   ├── diarize_mic.py       # 麦克风实时
+│   └── web/                 # Web 可视化前端（FastAPI + WS）
+│       ├── server.py
+│       └── static/index.html
 ├── tests/                   # 单元测试（聚类逻辑、trim、长 turn 切分）
 └── pyproject.toml           # uv 工程
 ```
@@ -170,4 +180,5 @@ uv run pytest tests/ -q
 - sherpa-onnx（ONNX Runtime 运行时，`sherpa-onnx-bin` 提供 `libonnxruntime.so`）
 - numpy
 - soundfile（音频文件读取）
-- 可选：sounddevice（麦克风输入）
+- 可选：sounddevice（麦克风输入，`uv sync --extra mic`）
+- 可选：fastapi + uvicorn（Web 前端，`uv sync --extra web`）
