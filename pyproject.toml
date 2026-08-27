@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sherpa-diarize"
+version = "0.1.0"
+description = "端侧实时流式说话人分离：sherpa-onnx VAD + 说话人 embedding + 在线质心聚类"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.2",
+    "sherpa-onnx==1.13.6",
+    "sherpa-onnx-bin==1.13.6",
+    "soundfile>=0.14.0",
+]
+
+[project.optional-dependencies]
+mic = ["sounddevice>=0.5.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["sherpa_diarize"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.4",
+]
