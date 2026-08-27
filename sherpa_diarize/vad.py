@@ -2,15 +2,23 @@
 
 内部使用 sherpa-onnx 的 Silero VAD（VoiceActivityDetector），
 对外暴露 `accept_waveform` 增量输入与 `drain` 增量输出。
+
+可选回调（供流式 ASR 并行消费语音）：
+- `on_speech(samples)`：检测到新的语音样本即回调（窗口粒度），turn 内持续累积；
+- `on_turn_end()`：一个 turn 结束（语音→静音切换或 flush）时回调一次。
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 import sherpa_onnx
 
 __all__ = ["Turn", "Vad"]
+
+SpeechCallback = Callable[[np.ndarray], None]
+TurnEndCallback = Callable[[], None]
 
 
 @dataclass
@@ -54,6 +62,40 @@ class Vad:
         self._window = cfg.silero_vad.window_size  # 512 samples = 32ms
         self._remainder = np.zeros(0, dtype=np.float32)
         self._num_consumed = 0  # 已送入 VAD 的样本总数，用于计算 turn 起点
+        self._on_speech: SpeechCallback | None = None
+        self._on_turn_end: TurnEndCallback | None = None
+        self._in_speech = False  # 上一窗口是否处于语音段
+        self._fed = 0  # 已回调的当前 turn 语音样本数
+
+    def set_callbacks(
+        self,
+        on_speech: SpeechCallback | None = None,
+        on_turn_end: TurnEndCallback | None = None,
+    ) -> None:
+        """设置语音样本 / turn 结束回调（供流式 ASR 并行消费）。"""
+        self._on_speech = on_speech
+        self._on_turn_end = on_turn_end
+
+    def _feed_window(self, w: np.ndarray) -> None:
+        """喂一个窗口并同步触发回调（语音样本增量 / turn 结束）。"""
+        self._vad.accept_waveform(w)
+        if self._vad.is_speech_detected():
+            if not self._in_speech:
+                self._in_speech = True
+                self._fed = 0  # 新 turn，重新计数
+            seg = self._vad.current_segment
+            samples_arr = seg.samples
+            n = len(samples_arr)
+            if n > self._fed:
+                # current_segment 是内部引用，立即拷贝再回调
+                new = np.array(samples_arr[self._fed :], dtype=np.float32)
+                self._fed = n
+                if self._on_speech is not None:
+                    self._on_speech(new)
+        elif self._in_speech:
+            self._in_speech = False
+            if self._on_turn_end is not None:
+                self._on_turn_end()
 
     def accept_waveform(self, samples: np.ndarray) -> None:
         """喂入任意长度的 float32 音频块。"""
@@ -68,7 +110,7 @@ class Vad:
         if n_whole > 0:
             windowed = buf[:n_whole].reshape(-1, self._window)
             for w in windowed:
-                self._vad.accept_waveform(w)
+                self._feed_window(w)
             self._num_consumed += n_whole
         self._remainder = buf[n_whole:]
 
@@ -79,6 +121,10 @@ class Vad:
             self._num_consumed += self._remainder.size
             self._remainder = np.zeros(0, dtype=np.float32)
         self._vad.flush()
+        if self._in_speech:
+            self._in_speech = False
+            if self._on_turn_end is not None:
+                self._on_turn_end()
 
     def drain(self) -> list[Turn]:
         """取出所有已完成的 turn（不阻塞）。"""
@@ -97,3 +143,5 @@ class Vad:
         self._vad.reset()
         self._remainder = np.zeros(0, dtype=np.float32)
         self._num_consumed = 0
+        self._in_speech = False
+        self._fed = 0

@@ -6,11 +6,12 @@
 from __future__ import annotations
 
 import itertools
+from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
 
-from sherpa_diarize.asr import Asr
+from sherpa_diarize.asr import Asr, StreamingAsr
 from sherpa_diarize.clustering import OnlineClustering
 from sherpa_diarize.embedding import SpeakerEmbedder
 from sherpa_diarize.vad import Turn, Vad
@@ -77,13 +78,16 @@ class Pipeline:
         vad: Vad,
         embedder: SpeakerEmbedder,
         clustering: OnlineClustering,
-        asr: Asr | None = None,
+        asr: Asr | StreamingAsr | None = None,
+        streaming: bool = False,
         max_turn_seconds: float = 6.0,
         change_threshold: float = 0.6,
     ) -> None:
         """Args:
           vad / embedder / clustering: 三个构件。
-          asr: 可选。提供时对每个 turn 同步做 ASR 转写，写入事件 text 字段。
+          asr: 可选。提供时对每个 turn 输出 ASR 转写，写入事件 text 字段。
+          streaming: True 时 asr 必须是 StreamingAsr——turn 进行中增量识别，
+            结束时即刻出文本；False 时 asr 是 Asr——turn 结束后整段识别。
           max_turn_seconds: 超过该时长的 turn 内部做说话人变化检测（滑动窗口
             embedding 序列找相似度骤降点）后切分，避免两人快速交替时混合成一个 turn。
           change_threshold: 相邻窗口 embedding 余弦相似度低于该值视为说话人切换点。
@@ -92,10 +96,19 @@ class Pipeline:
         self.embedder = embedder
         self.clustering = clustering
         self.asr = asr
+        self.streaming = streaming
         self.max_turn_seconds = max_turn_seconds
         self.change_threshold = change_threshold
         self._events: list[DiarizationEvent] = []
+        self._asr_texts: deque[str] = deque()  # 流式模式：按 turn 顺序排队的最终文本
         self._finished = False
+        if streaming:
+            if asr is None or not callable(getattr(asr, "accept_waveform", None)) or not callable(getattr(asr, "end_turn", None)):
+                raise ValueError("streaming=True 时 asr 必须提供 accept_waveform/end_turn（如 StreamingAsr）")
+            vad.set_callbacks(
+                on_speech=asr.accept_waveform,
+                on_turn_end=lambda: self._asr_texts.append(asr.end_turn()),
+            )
 
     # 子分段固定参数
     _FRAME_SECONDS = 0.032  # 能量帧长（32ms，与 VAD 窗口一致）
@@ -194,14 +207,19 @@ class Pipeline:
                 )
             else:
                 subturns = [Turn(start=start, end=start + len(samples) / self.vad.sample_rate, samples=samples)]
-            for st in subturns:
+            # 流式模式：该 turn 的文本在 turn 进行中已识别完，从队列配对；
+            # 长 turn 子分段后文本挂第一个子段（整 turn 的转写，无子段边界信息）
+            turn_text = self._asr_texts.popleft() if self.streaming else ""
+            for i, st in enumerate(subturns):
                 try:
                     emb = self.embedder.extract(st.samples)
                 except ValueError:
                     # 语音过短无法提 embedding：丢弃（VAD 已按 min_speech_duration 过滤，极少发生）
                     continue
                 sid, conf = self.clustering.assign(emb)
-                text = self.asr.recognize(st.samples) if self.asr else ""
+                text = turn_text if i == 0 else ""
+                if not self.streaming and self.asr is not None:
+                    text = self.asr.recognize(st.samples)
                 self._events.append(
                     DiarizationEvent(
                         start=st.start,
