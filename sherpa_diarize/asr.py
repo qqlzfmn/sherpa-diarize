@@ -84,6 +84,12 @@ class StreamingAsr:
         while self._recognizer.is_ready(self._stream):
             self._recognizer.decode_stream(self._stream)
 
+    def partial_text(self) -> str:
+        """当前进行中 turn 的增量识别文本（未 finalize）。无进行中 turn 返回空串。"""
+        if self._stream is None:
+            return ""
+        return self._recognizer.get_result(self._stream)
+
     def end_turn(self) -> str:
         """turn 结束：取最终文本并复位内部状态。无音频时返回空串。
 

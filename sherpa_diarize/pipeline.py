@@ -230,6 +230,12 @@ class Pipeline:
                     )
                 )
 
+    def partial_text(self) -> str:
+        """流式模式下当前进行中 turn 的增量识别文本（灰色预览）；其他模式返回空串。"""
+        if self.streaming and self.asr is not None:
+            return self.asr.partial_text()
+        return ""
+
     def events(self) -> list[DiarizationEvent]:
         """全部事件（speaker_id 已按最新质心合并结果归一）。"""
         return [
