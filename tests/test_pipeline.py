@@ -67,6 +67,20 @@ class FakeVad:
 
     def __init__(self, turns=None):
         self._turns = list(turns or [])
+        self.on_speech = None
+        self.on_turn_end = None
+
+    @property
+    def turns(self):
+        return self._turns
+
+    @turns.setter
+    def turns(self, value):
+        self._turns = list(value)
+
+    def set_callbacks(self, on_speech=None, on_turn_end=None):
+        self.on_speech = on_speech
+        self.on_turn_end = on_turn_end
 
     def accept_waveform(self, samples):
         pass
@@ -149,3 +163,64 @@ class TestSplitLongTurn:
         events = pipe.events()
         assert len(events) == 1
         assert events[0].text == "你好世界"
+
+
+class FakeStreamingAsr:
+    """记录增量输入，end_turn 返回文本。"""
+
+    def __init__(self):
+        self.received = []
+        self.closed_turns = 0
+
+    def accept_waveform(self, samples):
+        self.received.append(samples.copy())
+
+    def end_turn(self):
+        self.closed_turns += 1
+        return f"text-{self.closed_turns}"
+
+
+class TestStreamingMode:
+    def test_streaming_wires_callbacks(self):
+        """streaming=True 时 pipeline 在 vad 上挂接回调，文本按 turn 配对。"""
+        clustering = FakeClustering()
+        vad = FakeVad()
+        asr = FakeStreamingAsr()
+        pipe = Pipeline(vad=vad, embedder=FakeEmbedder(), clustering=clustering,
+                        asr=asr, streaming=True, max_turn_seconds=6.0)
+        assert vad.on_speech is not None and vad.on_turn_end is not None
+
+        # 模拟真实 VAD：两个 turn，各触发 on_speech（喂语音）与 on_turn_end（文本入队）
+        turns = [
+            Turn(start=0.0, end=2.0, samples=sine(F1, 2.0)),
+            Turn(start=3.0, end=5.0, samples=sine(F2, 2.0)),
+        ]
+        pipe.vad.turns = turns
+        for t in turns:
+            pipe.vad.on_speech(t.samples)
+            pipe.vad.on_turn_end()
+        pipe.finish()
+        events = pipe.events()
+        assert len(events) == 2
+        assert [ev.text for ev in events] == ["text-1", "text-2"]
+        assert [ev.speaker_id for ev in events] == [0, 1]
+        assert len(asr.received) == 2  # 每个 turn 的语音都增量喂入
+
+    def test_streaming_text_attached_to_first_subturn(self):
+        """流式模式：长 turn 子分段后，整 turn 文本挂第一个子段。"""
+        clustering = FakeClustering()
+        vad = FakeVad()
+        asr = FakeStreamingAsr()
+        pipe = Pipeline(vad=vad, embedder=FakeEmbedder(), clustering=clustering,
+                        asr=asr, streaming=True, max_turn_seconds=6.0, change_threshold=0.6)
+        # 长 turn：两人交替（5s F1 + 0.2s 静音 + 5s F2）→ 子分段为 2 段
+        x = np.concatenate([sine(F1, 5.0), np.zeros(int(0.2 * SR), np.float32), sine(F2, 5.0)])
+        turn = Turn(start=10.0, end=10.0 + len(x) / SR, samples=x)
+        vad.turns = [turn]
+        pipe.vad.on_speech(x)
+        pipe.vad.on_turn_end()
+        pipe.finish()
+        events = pipe.events()
+        assert len(events) == 2
+        assert events[0].text == "text-1"  # 整 turn 文本挂第一个子段
+        assert events[1].text == ""
