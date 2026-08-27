@@ -6,12 +6,14 @@
 
 默认下载（均为 MIT/Apache 许可、16kHz 可端侧部署的模型）:
 - models/silero_vad.onnx                                  VAD（k2-fsa 导出, 629KB）
-- models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx  说话人 embedding
+- models/wespeaker_zh_cnceleb_resnet34.onnx               说话人 embedding（中文）
+- models/sherpa-onnx-paraformer-zh-small-2024-03-09/      ASR（中文转写, int8）
 - models/0-four-speakers-zh.wav                           demo 音频（4 说话人，中文）
 
 可选:
     python3 scripts/download_models.py --vad-only    # 只下 VAD
     python3 scripts/download_models.py --embed-only  # 只下 embedding
+    python3 scripts/download_models.py --asr-only    # 只下 ASR
 """
 from __future__ import annotations
 
@@ -24,21 +26,32 @@ from pathlib import Path
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 
-# (本地文件名, 下载 URL, 说明)
+# (kind, 本地名, 下载 URL, 说明)；kind: "file" 单文件 | "dir" tar.bz2 解压目录
 VAD_MODEL = (
+    "file",
     "silero_vad.onnx",
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
     "Silero VAD v4（k2-fsa 导出，仅 16kHz，629KB）",
 )
 
 EMBEDDING_MODEL = (
+    "file",
     "wespeaker_zh_cnceleb_resnet34.onnx",
     ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
      "wespeaker_zh_cnceleb_resnet34.onnx"),
     "WeSpeaker resnet34 说话人 embedding（中文，CNN- Celeb 训练，26.5MB）",
 )
 
+ASR_MODEL = (
+    "dir",
+    "sherpa-onnx-paraformer-zh-small-2024-03-09",
+    ("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
+     "sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"),
+    "Paraformer 中文 ASR（int8，model.int8.onnx + tokens.txt）",
+)
+
 DEMO_AUDIO = (
+    "file",
     "0-four-speakers-zh.wav",
     ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/"
      "0-four-speakers-zh.wav"),
@@ -61,7 +74,7 @@ def _https_opener() -> urllib.request.OpenerDirector:
 
 
 def download(url: str, dest: Path, description: str) -> None:
-    if dest.is_file() and dest.stat().st_size > 0:
+    if dest.exists():
         print(f"[skip] {dest.name} 已存在")
         return
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +94,14 @@ def download(url: str, dest: Path, description: str) -> None:
                     pct = done / total * 100
                     print(f"\r  {done / 1e6:.1f}/{total / 1e6:.1f} MB ({pct:.0f}%)", end="")
         print()
-        tmp.replace(dest)
+        if dest.suffix == ".tar.bz2":
+            import tarfile
+
+            with tarfile.open(tmp, "r:bz2") as tf:
+                tf.extractall(dest.parent, filter="data")
+            tmp.unlink(missing_ok=True)
+        else:
+            tmp.replace(dest)
         print(f"[完成] {dest}")
     except Exception as e:
         tmp.unlink(missing_ok=True)
@@ -94,6 +114,7 @@ def main() -> None:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--vad-only", action="store_true", help="只下载 VAD 模型")
     group.add_argument("--embed-only", action="store_true", help="只下载 embedding 模型")
+    group.add_argument("--asr-only", action="store_true", help="只下载 ASR 模型")
     group.add_argument("--audio-only", action="store_true", help="只下载 demo 音频")
     parser.add_argument(
         "--mirror",
@@ -109,12 +130,14 @@ def main() -> None:
         jobs = [VAD_MODEL]
     elif args.embed_only:
         jobs = [EMBEDDING_MODEL]
+    elif args.asr_only:
+        jobs = [ASR_MODEL]
     elif args.audio_only:
         jobs = [DEMO_AUDIO]
     else:
-        jobs = [VAD_MODEL, EMBEDDING_MODEL, DEMO_AUDIO]
+        jobs = [VAD_MODEL, EMBEDDING_MODEL, ASR_MODEL, DEMO_AUDIO]
 
-    for name, url, desc in jobs:
+    for kind, name, url, desc in jobs:
         download(prefix + url, MODELS_DIR / name, desc)
 
 

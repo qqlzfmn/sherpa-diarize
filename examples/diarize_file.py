@@ -6,6 +6,13 @@
       --vad-model models/silero_vad.onnx \
       --embed-model models/wespeaker_zh_cnceleb_resnet34.onnx
 
+同步输出 ASR 转写（可选）：
+  python3 examples/diarize_file.py --wav models/0-four-speakers-zh.wav \
+      --vad-model models/silero_vad.onnx \
+      --embed-model models/wespeaker_zh_cnceleb_resnet34.onnx \
+      --asr-model models/sherpa-onnx-paraformer-zh-small-2024-03-09/model.int8.onnx \
+      --asr-tokens models/sherpa-onnx-paraformer-zh-small-2024-03-09/tokens.txt
+
 常用参数：
   --chunk-ms 200      每块时长（越小越"实时"，越大越快）
   --realtime          按真实时间速度回放（默认尽快跑完）
@@ -38,6 +45,8 @@ def main() -> None:
     parser.add_argument("--wav", required=True, help="输入 wav（16kHz 单声道最佳，其他采样率自动重采样）")
     parser.add_argument("--vad-model", required=True, help="silero_vad.onnx 路径")
     parser.add_argument("--embed-model", required=True, help="说话人 embedding onnx 路径")
+    parser.add_argument("--asr-model", type=str, default="", help="ASR onnx 路径（可选，如 models/sherpa-onnx-paraformer-zh-small-2024-03-09/model.int8.onnx）")
+    parser.add_argument("--asr-tokens", type=str, default="", help="ASR tokens.txt 路径（--asr-model 提供时必填）")
     parser.add_argument("--chunk-ms", type=int, default=200, help="喂入块时长（毫秒）")
     parser.add_argument("--realtime", action="store_true", help="按真实时间速度回放")
     parser.add_argument("--threshold", type=float, default=0.6, help="说话人归并阈值")
@@ -47,10 +56,20 @@ def main() -> None:
     parser.add_argument("--rttm", type=str, default="", help="导出 RTTM 文件路径（可选）")
     args = parser.parse_args()
 
+    if bool(args.asr_model) != bool(args.asr_tokens):
+        parser.error("--asr-model 与 --asr-tokens 必须同时提供")
+
     audio, sr = sf.read(args.wav, dtype="float32", always_2d=True)
     audio = audio[:, 0]  # 单声道
     audio = resample_to_16k(audio, sr)
     print(f"音频: {len(audio) / 16000:.1f}s @16kHz, 块 {args.chunk_ms}ms")
+
+    asr = None
+    if args.asr_model:
+        from sherpa_diarize import Asr
+
+        asr = Asr(model=args.asr_model, tokens=args.asr_tokens)
+        print(f"ASR 已启用: {Path(args.asr_model).name}")
 
     pipe = Pipeline(
         vad=Vad(args.vad_model),
@@ -58,9 +77,16 @@ def main() -> None:
         clustering=OnlineClustering(
             threshold=args.threshold, merge_threshold=args.merge_threshold
         ),
+        asr=asr,
         max_turn_seconds=args.max_turn,
         change_threshold=args.change_threshold,
     )
+
+    def show(ev):
+        line = f"[{ev.start:7.2f}s - {ev.end:7.2f}s] speaker_{ev.speaker_id} (conf {ev.confidence:.2f})"
+        if ev.text:
+            line += f"\n            {ev.text}"
+        print(line)
 
     chunk = int(args.chunk_ms / 1000 * 16000)
     chunk_sec = chunk / 16000
@@ -68,14 +94,14 @@ def main() -> None:
     for i in range(0, len(audio), chunk):
         pipe.accept_waveform(audio[i : i + chunk])
         for ev in pipe.events()[n:]:
-            print(f"[{ev.start:7.2f}s - {ev.end:7.2f}s] speaker_{ev.speaker_id} (conf {ev.confidence:.2f})")
+            show(ev)
             n += 1
         if args.realtime:
             time.sleep(chunk_sec)
 
     pipe.finish()
     for ev in pipe.events()[n:]:
-        print(f"[{ev.start:7.2f}s - {ev.end:7.2f}s] speaker_{ev.speaker_id} (conf {ev.confidence:.2f})")
+        show(ev)
 
     events = pipe.events()
     durations = {}
