@@ -1,31 +1,32 @@
 #!/usr/bin/env python3
-"""Web 演示前端：浏览器实时查看流式说话人分离与 ASR 转写。
+"""Web 前端后端：浏览器音频（示例/上传/录音）经 WebSocket 二进制通道喂入管线。
 
-启动（依赖 web extra）:
+协议（/ws，文本消息为 JSON，其余为 Float32 16kHz 音频块）：
+  客户端 → 服务端:
+    {type:"config", asr_mode:"none"|"offline"|"streaming"}   开始前配置（每连接一次）
+    <二进制 Float32 块>                                      音频（100ms=3200 样本）
+    {type:"end"}                                             音频结束（pipeline.finish）
+    {type:"stop"}                                            中断
+  服务端 → 客户端:
+    {type:"started"}                                         管线就绪
+    {type:"partial", text}                                   流式增量识别文本（灰色预览）
+    {type:"event", start, end, speaker, confidence, text}    说话人 turn 事件（final）
+    {type:"progress", t}                                     累计音频秒数
+    {type:"done", speakers}                                  处理完成
+    {type:"error", message}                                  错误
+
+启动:
     uv sync --extra web
     uv run python3 examples/web/server.py --port 8000
-
-浏览器打开 http://localhost:8000：
-- 选择回放音频与 ASR 模式，点击启动；
-- 服务端逐块喂入管线，事件经 WebSocket 实时推送，前端渲染说话人时间轴与转写文本。
-
-可选参数：
-    --host 127.0.0.1  监听地址
-    --port 8000       监听端口
-    --models-dir models  模型目录（自动探测 VAD/embedding/ASR 模型）
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
-import queue
-import threading
-import time
+import json
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
-import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -40,14 +41,12 @@ from sherpa_diarize import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-
-DEFAULT_WAV = "models/0-four-speakers-zh.wav"
-CHUNK_MS = 200
 SAMPLE_RATE = 16000
 models_dir = ROOT / "models"  # main() 可覆盖
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+app.mount("/models", StaticFiles(directory=Path(__file__).parent.parent.parent / "models"), name="models")
 
 
 @app.get("/")
@@ -55,140 +54,128 @@ async def index():
     return FileResponse(Path(__file__).parent / "static" / "index.html")
 
 
-def _model_paths(models_dir: Path) -> dict:
+def _model_paths() -> dict:
     """探测可用的模型文件。"""
-    out = {
-        "vad": str(models_dir / "silero_vad.onnx"),
-        "embed": str(models_dir / "wespeaker_zh_cnceleb_resnet34.onnx"),
-    }
     paraformer_dir = models_dir / "sherpa-onnx-paraformer-zh-small-2024-03-09"
     streaming_dir = models_dir / "sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13"
-    out["asr_offline"] = {
-        "model": str(paraformer_dir / "model.int8.onnx"),
-        "tokens": str(paraformer_dir / "tokens.txt"),
+    return {
+        "vad": models_dir / "silero_vad.onnx",
+        "embed": models_dir / "wespeaker_zh_cnceleb_resnet34.onnx",
+        "asr_offline": {
+            "model": paraformer_dir / "model.int8.onnx",
+            "tokens": paraformer_dir / "tokens.txt",
+        },
+        "asr_streaming": {
+            "model": streaming_dir / "ctc-epoch-20-avg-1-chunk-16-left-128.int8.onnx",
+            "tokens": streaming_dir / "tokens.txt",
+        },
+        "demo_wavs": {
+            "0-four-speakers-zh.wav": "/models/0-four-speakers-zh.wav",
+        },
     }
-    out["asr_streaming"] = {
-        "model": str(streaming_dir / "ctc-epoch-20-avg-1-chunk-16-left-128.int8.onnx"),
-        "tokens": str(streaming_dir / "tokens.txt"),
-    }
-    out["wav"] = str(models_dir / "0-four-speakers-zh.wav")
-    return out
 
 
 @app.get("/api/models")
 async def api_models():
-    return _model_paths(models_dir)
+    m = _model_paths()
+    return {
+        "models_ready": all(p.is_file() for p in [m["vad"], m["embed"]]),
+        "asr_offline_ready": all(p.is_file() for p in m["asr_offline"].values()),
+        "asr_streaming_ready": all(p.is_file() for p in m["asr_streaming"].values()),
+        "demo_wavs": m["demo_wavs"],
+    }
 
 
-@app.websocket("/ws")
-async def ws_endpoint(ws: WebSocket):
-    await ws.accept()
-    q: queue.Queue = queue.Queue()
-    stop = threading.Event()
-
-    async def forward():
-        """把工作线程的事件增量推给浏览器。"""
-        while True:
-            item = await asyncio.to_thread(q.get)  # queue.get 阻塞，转线程执行
-            await ws.send_json(item)
-
-    async def control():
-        while True:
-            msg = await ws.receive_json()
-            if msg["type"] == "start":
-                stop.clear()
-                threading.Thread(
-                    target=run_pipeline, args=(msg, q, stop), daemon=True
-                ).start()
-            elif msg["type"] == "stop":
-                stop.set()
-
-    try:
-        await asyncio.gather(forward(), control())
-    except WebSocketDisconnect:
-        stop.set()
-    finally:
-        stop.set()
-
-
-def run_pipeline(msg: dict, q: queue.Queue, stop: threading.Event) -> None:
-    """工作线程：按块回放音频并推送事件。"""
-    models = _model_paths(models_dir)
-    wav = msg.get("wav") or models["wav"]
-    speed = float(msg.get("speed", 1.0))
-    asr_mode = msg.get("asr_mode", "offline")
-
-    try:
-        audio, sr = sf.read(wav, dtype="float32", always_2d=True)
-        audio = audio[:, 0]
-        if sr != SAMPLE_RATE:
-            n_out = int(len(audio) * SAMPLE_RATE / sr)
-            audio = np.interp(
-                np.linspace(0, len(audio) - 1, n_out), np.arange(len(audio)), audio
-            ).astype(np.float32)
-        total = len(audio) / SAMPLE_RATE
-    except Exception as e:  # noqa: BLE001 — 工作线程错误必须上报给前端而非崩溃
-        q.put({"type": "error", "message": f"读取音频失败: {e}"})
-        return
-
+def build_pipeline(asr_mode: str, outq: asyncio.Queue, stop) -> Pipeline:
+    """构造管线。模型缺失时抛异常（由调用方转为 error 消息）。"""
+    m = _model_paths()
     asr = None
     streaming = False
     if asr_mode != "none":
-        try:
-            paths = models["asr_streaming"] if asr_mode == "streaming" else models["asr_offline"]
-            if asr_mode == "streaming":
-                asr = StreamingAsr(model=paths["model"], tokens=paths["tokens"])
-                streaming = True
-            else:
-                asr = Asr(model=paths["model"], tokens=paths["tokens"])
-        except Exception as e:  # noqa: BLE001 — 模型缺失/损坏时上报前端
-            q.put({"type": "error", "message": f"加载 ASR 模型失败: {e}"})
-            return
-
-    pipe = Pipeline(
-        vad=Vad(models["vad"]),
-        embedder=SpeakerEmbedder(models["embed"]),
+        if asr_mode == "streaming":
+            asr = StreamingAsr(model=str(m["asr_streaming"]["model"]), tokens=str(m["asr_streaming"]["tokens"]))
+            streaming = True
+        else:
+            asr = Asr(model=str(m["asr_offline"]["model"]), tokens=str(m["asr_offline"]["tokens"]))
+    return Pipeline(
+        vad=Vad(str(m["vad"])),
+        embedder=SpeakerEmbedder(str(m["embed"])),
         clustering=OnlineClustering(),
         asr=asr,
         streaming=streaming,
     )
 
-    q.put({"type": "started", "duration": total, "asr_mode": asr_mode})
-    chunk = int(CHUNK_MS / 1000 * SAMPLE_RATE)
-    n = 0
-    for i in range(0, len(audio), chunk):
-        if stop.is_set():
-            break
-        pipe.accept_waveform(audio[i : i + chunk])
-        for ev in pipe.events()[n:]:
-            q.put({
-                "type": "event",
-                "start": round(ev.start, 3),
-                "end": round(ev.end, 3),
-                "speaker": ev.speaker_id,
-                "confidence": round(ev.confidence, 3),
-                "text": ev.text,
-            })
-            n += 1
-        q.put({"type": "progress", "t": round(min(i / SAMPLE_RATE, total), 2)})
-        if speed > 0:
-            time.sleep(chunk / SAMPLE_RATE / speed)
 
-    pipe.finish()
-    for ev in pipe.events()[n:]:
-        q.put({
-            "type": "event",
-            "start": round(ev.start, 3),
-            "end": round(ev.end, 3),
-            "speaker": ev.speaker_id,
-            "confidence": round(ev.confidence, 3),
-            "text": ev.text,
-        })
-    q.put({"type": "done", "speakers": pipe.clustering.num_speakers})
+@app.websocket("/ws")
+async def ws_endpoint(ws: WebSocket):
+    await ws.accept()
+    outq: asyncio.Queue = asyncio.Queue()
+    pipe: Pipeline | None = None
+    total_seconds = 0.0
+    n_events = 0
+
+    async def sender():
+        while True:
+            msg = await outq.get()
+            await ws.send_json(msg)
+
+    sender_task = asyncio.create_task(sender())
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") != "websocket.receive":
+                continue
+            if "text" in msg:
+                data = json.loads(msg["text"])
+                if data["type"] == "config":
+                    try:
+                        pipe = build_pipeline(data.get("asr_mode", "none"), outq, None)
+                    except Exception as e:  # noqa: BLE001 — 模型缺失/损坏上报前端
+                        await outq.put({"type": "error", "message": f"模型加载失败: {e}"})
+                        pipe = None
+                    else:
+                        total_seconds = 0.0
+                        n_events = 0
+                        await outq.put({"type": "started", "asr_mode": data.get("asr_mode", "none")})
+                elif data["type"] == "end":
+                    if pipe is not None:
+                        pipe.finish()
+                        speakers = pipe.clustering.num_speakers
+                        pipe = None
+                        await outq.put({"type": "done", "speakers": speakers})
+                elif data["type"] == "stop":
+                    pipe = None
+            else:
+                if pipe is None:
+                    continue
+                samples = np.frombuffer(msg["bytes"], dtype=np.float32)
+                if samples.size == 0:
+                    continue
+                pipe.accept_waveform(samples)
+                total_seconds += samples.size / SAMPLE_RATE
+                # 推送本块产生的事件与流式 partial 预览
+                for ev in pipe.events()[n_events:]:
+                    n_events += 1
+                    await outq.put({
+                        "type": "event",
+                        "start": round(ev.start, 3),
+                        "end": round(ev.end, 3),
+                        "speaker": ev.speaker_id,
+                        "confidence": round(ev.confidence, 3),
+                        "text": ev.text,
+                    })
+                partial = pipe.partial_text()
+                if partial:
+                    await outq.put({"type": "partial", "text": partial})
+                await outq.put({"type": "progress", "t": round(total_seconds, 2)})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        sender_task.cancel()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="sherpa-diarize Web 演示前端")
+    parser = argparse.ArgumentParser(description="sherpa-diarize Web 前端")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--models-dir", default=str(ROOT / "models"), help="模型目录")
@@ -200,6 +187,8 @@ def main():
         raise SystemExit(f"缺少 VAD 模型，请先运行 python3 scripts/download_models.py（--models-dir={models_dir}）")
 
     print(f"Web 前端: http://{args.host}:{args.port}")
+    import uvicorn
+
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 
