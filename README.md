@@ -17,7 +17,9 @@ sherpa-onnx 提供 VAD 与说话人 embedding 能力；本项目在其构件之�
 1. **流式 VAD**（Silero VAD）把音频流切成说话片段（turn），长句内部再做说话人变化检测（能量静音候选 + 两侧 embedding 确认），解决两人快速交替时混合成一个 turn 的问题。
 2. **说话人 embedding**（WeSpeaker / 3D-Speaker）对每个 turn 提取定长向量（L2 归一化）。
 3. **在线聚类 / 说话人跟踪**：维护每名说话人的质心（EMA 更新），余弦相似度超过阈值则归入已有说话人，否则新建说话人；周期性合并相似质心，修复过分割。
-4. **ASR 转写**（可选）：对每个 turn 用 Paraformer 离线识别同步输出转写文本。
+4. **ASR 转写**（可选，两种模式）：
+   - `--asr-mode offline`：turn 结束后整段识别（Paraformer 离线模型，子段独立转写）；
+   - `--asr-mode streaming`：turn 进行中增量识别，结束即刻出文本（Zipformer CTC 流式模型，延迟≈0；长 turn 子分段后文本挂第一个子段）。
 5. 输出说话人 turn 事件：`(start, end, speaker_id, confidence, text)`，可导出 RTTM。
 
 ## 快速开始
@@ -42,10 +44,11 @@ python3 scripts/download_models.py --mirror https://ghfast.top/   # 国内网络
 | --- | --- | --- |
 | `silero_vad.onnx` | Silero VAD v4（16kHz） | 629 KB |
 | `wespeaker_zh_cnceleb_resnet34.onnx` | 说话人 embedding（中文） | 26.5 MB |
-| `sherpa-onnx-paraformer-zh-small-2024-03-09/` | Paraformer 中文 ASR（int8，可选） | ~80 MB |
+| `sherpa-onnx-paraformer-zh-small-2024-03-09/` | Paraformer 中文 ASR（离线，可选） | ~80 MB |
+| `sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/` | Zipformer CTC 中文 ASR（流式，可选） | ~69 MB |
 | `0-four-speakers-zh.wav` | demo 音频（4 说话人中文对话） | 1.8 MB |
 
-可选：`--vad-only` / `--embed-only` / `--asr-only` / `--audio-only` 只下载部分文件。
+可选：`--vad-only` / `--embed-only` / `--asr-only`（离线 ASR）/ `--asr-streaming-only`（流式 ASR）/ `--audio-only` 只下载部分文件。
 
 ### 3. 运行示例
 
@@ -61,12 +64,22 @@ python3 examples/diarize_file.py \
 同步输出 ASR 转写（可选）：
 
 ```bash
+# 非流式（默认）：turn 结束后整段识别
 python3 examples/diarize_file.py \
     --wav models/0-four-speakers-zh.wav \
     --vad-model models/silero_vad.onnx \
     --embed-model models/wespeaker_zh_cnceleb_resnet34.onnx \
     --asr-model models/sherpa-onnx-paraformer-zh-small-2024-03-09/model.int8.onnx \
     --asr-tokens models/sherpa-onnx-paraformer-zh-small-2024-03-09/tokens.txt
+
+# 流式：turn 进行中增量识别，结束即刻出文本
+python3 examples/diarize_file.py \
+    --wav models/0-four-speakers-zh.wav \
+    --vad-model models/silero_vad.onnx \
+    --embed-model models/wespeaker_zh_cnceleb_resnet34.onnx \
+    --asr-mode streaming \
+    --asr-model models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/ctc-epoch-20-avg-1-chunk-16-left-128.int8.onnx \
+    --asr-tokens models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/tokens.txt
 ```
 
 麦克风实时（需 `uv sync --extra mic`）：
@@ -75,8 +88,9 @@ python3 examples/diarize_file.py \
 python3 examples/diarize_mic.py \
     --vad-model models/silero_vad.onnx \
     --embed-model models/wespeaker_zh_cnceleb_resnet34.onnx \
-    --asr-model models/sherpa-onnx-paraformer-zh-small-2024-03-09/model.int8.onnx \
-    --asr-tokens models/sherpa-onnx-paraformer-zh-small-2024-03-09/tokens.txt
+    --asr-mode streaming \
+    --asr-model models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/ctc-epoch-20-avg-1-chunk-16-left-128.int8.onnx \
+    --asr-tokens models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/tokens.txt
 ```
 
 ### 4. 示例输出
@@ -113,6 +127,7 @@ python3 examples/diarize_file.py ... --rttm out.rttm
 | `--chunk-ms` | 200 | 喂入块时长（文件回放） |
 | `--realtime` | off | 文件按真实时间速度回放 |
 | `--asr-model` / `--asr-tokens` | 空 | 启用 ASR 转写（两个需同时提供） |
+| `--asr-mode` | offline | `offline`: 整段识别；`streaming`: 增量识别 |
 
 ## 目录结构
 
@@ -122,7 +137,7 @@ sherpa-diarize/
 │   ├── vad.py               # 流式 VAD 封装（turn 切分）
 │   ├── embedding.py         # 说话人 embedding 提取封装
 │   ├── clustering.py        # 在线聚类（质心跟踪 + 周期合并）
-│   ├── asr.py               # ASR 转写封装（Paraformer，可选）
+│   ├── asr.py               # ASR 转写封装（Asr 离线 / StreamingAsr 流式，可选）
 │   └── pipeline.py          # 流式管线（含长 turn 说话人变化检测、静音 trim、RTTM 导出）
 ├── scripts/
 │   └── download_models.py   # 下载 VAD / embedding 模型与 demo 音频
@@ -145,10 +160,10 @@ uv run pytest tests/ -q
 
 - sherpa-onnx 官方提供 Android 示例（VAD、实时 ASR）与预编译 APK，见
   <https://k2-fsa.github.io/sherpa/onnx/vad/silero-vad.html#android-examples>；
-- 迁移路径：`Vad`/`SpeakerEmbedder` 直接对应 sherpa-onnx 的 C API
-  （`VoiceActivityDetector`、`SpeakerEmbeddingExtractor`），
+- 迁移路径：`Vad`/`SpeakerEmbedder`/`Asr`/`StreamingAsr` 直接对应 sherpa-onnx 的 C API
+  （`VoiceActivityDetector`、`SpeakerEmbeddingExtractor`、`OfflineRecognizer`、`OnlineRecognizer`），
   管线中的聚类/trim/变化检测为纯数值逻辑，可平移为 C++/JNI；
-- 模型文件（`silero_vad.onnx` + `wespeaker_zh_cnceleb_resnet34.onnx`）可直接打包进 APK assets。
+- 模型文件（`silero_vad.onnx` + `wespeaker_zh_cnceleb_resnet34.onnx`，可选 ASR 模型）可直接打包进 APK assets。
 
 ## 依赖
 
