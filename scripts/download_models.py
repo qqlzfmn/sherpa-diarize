@@ -7,13 +7,15 @@
 默认下载（均为 MIT/Apache 许可、16kHz 可端侧部署的模型）:
 - models/silero_vad.onnx                                  VAD（k2-fsa 导出, 629KB）
 - models/wespeaker_zh_cnceleb_resnet34.onnx               说话人 embedding（中文）
-- models/sherpa-onnx-paraformer-zh-small-2024-03-09/      ASR（中文转写, int8）
+- models/sherpa-onnx-paraformer-zh-small-2024-03-09/      ASR（中文转写, 离线, int8）
+- models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/   ASR（流式, int8）
 - models/0-four-speakers-zh.wav                           demo 音频（4 说话人，中文）
 
 可选:
-    python3 scripts/download_models.py --vad-only    # 只下 VAD
-    python3 scripts/download_models.py --embed-only  # 只下 embedding
-    python3 scripts/download_models.py --asr-only    # 只下 ASR
+    python3 scripts/download_models.py --vad-only          # 只下 VAD
+    python3 scripts/download_models.py --embed-only        # 只下 embedding
+    python3 scripts/download_models.py --asr-only          # 只下离线 ASR
+    python3 scripts/download_models.py --asr-streaming-only  # 只下流式 ASR
 """
 from __future__ import annotations
 
@@ -48,6 +50,14 @@ ASR_MODEL = (
     ("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
      "sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"),
     "Paraformer 中文 ASR（int8，model.int8.onnx + tokens.txt）",
+)
+
+STREAMING_ASR_MODEL = (
+    "dir",
+    "sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13",
+    ("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
+     "sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13.tar.bz2"),
+    "Zipformer CTC 流式中文 ASR（int8，ctc-*.int8.onnx + tokens.txt）",
 )
 
 DEMO_AUDIO = (
@@ -114,7 +124,8 @@ def main() -> None:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--vad-only", action="store_true", help="只下载 VAD 模型")
     group.add_argument("--embed-only", action="store_true", help="只下载 embedding 模型")
-    group.add_argument("--asr-only", action="store_true", help="只下载 ASR 模型")
+    group.add_argument("--asr-only", action="store_true", help="只下载离线 ASR 模型")
+    group.add_argument("--asr-streaming-only", action="store_true", help="只下载流式 ASR 模型")
     group.add_argument("--audio-only", action="store_true", help="只下载 demo 音频")
     parser.add_argument(
         "--mirror",
@@ -132,10 +143,12 @@ def main() -> None:
         jobs = [EMBEDDING_MODEL]
     elif args.asr_only:
         jobs = [ASR_MODEL]
+    elif args.asr_streaming_only:
+        jobs = [STREAMING_ASR_MODEL]
     elif args.audio_only:
         jobs = [DEMO_AUDIO]
     else:
-        jobs = [VAD_MODEL, EMBEDDING_MODEL, ASR_MODEL, DEMO_AUDIO]
+        jobs = [VAD_MODEL, EMBEDDING_MODEL, ASR_MODEL, STREAMING_ASR_MODEL, DEMO_AUDIO]
 
     for kind, name, url, desc in jobs:
         download(prefix + url, MODELS_DIR / name, desc)

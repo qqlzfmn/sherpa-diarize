@@ -9,11 +9,20 @@
 说话时实时打印 "谁在什么时候说话"，Ctrl+C 结束。
 
 同步输出 ASR 转写（可选）：
+  # 非流式（默认）：turn 结束后整段识别
   python3 examples/diarize_mic.py \
       --vad-model models/silero_vad.onnx \
       --embed-model models/wespeaker_zh_cnceleb_resnet34.onnx \
       --asr-model models/sherpa-onnx-paraformer-zh-small-2024-03-09/model.int8.onnx \
       --asr-tokens models/sherpa-onnx-paraformer-zh-small-2024-03-09/tokens.txt
+
+  # 流式：turn 进行中增量识别，结束即刻出文本
+  python3 examples/diarize_mic.py \
+      --vad-model models/silero_vad.onnx \
+      --embed-model models/wespeaker_zh_cnceleb_resnet34.onnx \
+      --asr-mode streaming \
+      --asr-model models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/ctc-epoch-20-avg-1-chunk-16-left-128.int8.onnx \
+      --asr-tokens models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/tokens.txt
 """
 from __future__ import annotations
 
@@ -36,6 +45,7 @@ def main() -> None:
     parser.add_argument("--embed-model", required=True, help="说话人 embedding onnx 路径")
     parser.add_argument("--asr-model", type=str, default="", help="ASR onnx 路径（可选）")
     parser.add_argument("--asr-tokens", type=str, default="", help="ASR tokens.txt 路径（--asr-model 提供时必填）")
+    parser.add_argument("--asr-mode", type=str, default="offline", choices=["offline", "streaming"], help="offline: turn 结束后整段识别；streaming: turn 进行中增量识别")
     parser.add_argument("--threshold", type=float, default=0.6, help="说话人归并阈值")
     parser.add_argument("--merge-threshold", type=float, default=0.9, help="质心合并阈值")
     parser.add_argument("--device", type=int, default=None, help="输入设备索引（默认系统默认设备）")
@@ -45,10 +55,17 @@ def main() -> None:
         parser.error("--asr-model 与 --asr-tokens 必须同时提供")
 
     asr = None
+    streaming = False
     if args.asr_model:
-        from sherpa_diarize import Asr
+        if args.asr_mode == "streaming":
+            from sherpa_diarize import StreamingAsr
 
-        asr = Asr(model=args.asr_model, tokens=args.asr_tokens)
+            asr = StreamingAsr(model=args.asr_model, tokens=args.asr_tokens)
+            streaming = True
+        else:
+            from sherpa_diarize import Asr
+
+            asr = Asr(model=args.asr_model, tokens=args.asr_tokens)
 
     pipe = Pipeline(
         vad=Vad(args.vad_model),
@@ -57,6 +74,7 @@ def main() -> None:
             threshold=args.threshold, merge_threshold=args.merge_threshold
         ),
         asr=asr,
+        streaming=streaming,
     )
 
     def show(ev):

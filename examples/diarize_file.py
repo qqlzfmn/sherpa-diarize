@@ -7,11 +7,20 @@
       --embed-model models/wespeaker_zh_cnceleb_resnet34.onnx
 
 同步输出 ASR 转写（可选）：
+  # 非流式（默认）：turn 结束后整段识别（Paraformer 离线模型）
   python3 examples/diarize_file.py --wav models/0-four-speakers-zh.wav \
       --vad-model models/silero_vad.onnx \
       --embed-model models/wespeaker_zh_cnceleb_resnet34.onnx \
       --asr-model models/sherpa-onnx-paraformer-zh-small-2024-03-09/model.int8.onnx \
       --asr-tokens models/sherpa-onnx-paraformer-zh-small-2024-03-09/tokens.txt
+
+  # 流式：turn 进行中增量识别，结束即刻出文本（Zipformer CTC 流式模型）
+  python3 examples/diarize_file.py --wav models/0-four-speakers-zh.wav \
+      --vad-model models/silero_vad.onnx \
+      --embed-model models/wespeaker_zh_cnceleb_resnet34.onnx \
+      --asr-mode streaming \
+      --asr-model models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/ctc-epoch-20-avg-1-chunk-16-left-128.int8.onnx \
+      --asr-tokens models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/tokens.txt
 
 常用参数：
   --chunk-ms 200      每块时长（越小越"实时"，越大越快）
@@ -45,8 +54,9 @@ def main() -> None:
     parser.add_argument("--wav", required=True, help="输入 wav（16kHz 单声道最佳，其他采样率自动重采样）")
     parser.add_argument("--vad-model", required=True, help="silero_vad.onnx 路径")
     parser.add_argument("--embed-model", required=True, help="说话人 embedding onnx 路径")
-    parser.add_argument("--asr-model", type=str, default="", help="ASR onnx 路径（可选，如 models/sherpa-onnx-paraformer-zh-small-2024-03-09/model.int8.onnx）")
+    parser.add_argument("--asr-model", type=str, default="", help="ASR onnx 路径（可选，offline 用 Paraformer model.int8.onnx，streaming 用 Zipformer CTC .int8.onnx）")
     parser.add_argument("--asr-tokens", type=str, default="", help="ASR tokens.txt 路径（--asr-model 提供时必填）")
+    parser.add_argument("--asr-mode", type=str, default="offline", choices=["offline", "streaming"], help="offline: turn 结束后整段识别；streaming: turn 进行中增量识别")
     parser.add_argument("--chunk-ms", type=int, default=200, help="喂入块时长（毫秒）")
     parser.add_argument("--realtime", action="store_true", help="按真实时间速度回放")
     parser.add_argument("--threshold", type=float, default=0.6, help="说话人归并阈值")
@@ -65,11 +75,18 @@ def main() -> None:
     print(f"音频: {len(audio) / 16000:.1f}s @16kHz, 块 {args.chunk_ms}ms")
 
     asr = None
+    streaming = False
     if args.asr_model:
-        from sherpa_diarize import Asr
+        if args.asr_mode == "streaming":
+            from sherpa_diarize import StreamingAsr
 
-        asr = Asr(model=args.asr_model, tokens=args.asr_tokens)
-        print(f"ASR 已启用: {Path(args.asr_model).name}")
+            asr = StreamingAsr(model=args.asr_model, tokens=args.asr_tokens)
+            streaming = True
+        else:
+            from sherpa_diarize import Asr
+
+            asr = Asr(model=args.asr_model, tokens=args.asr_tokens)
+        print(f"ASR 已启用（{args.asr_mode}）: {Path(args.asr_model).name}")
 
     pipe = Pipeline(
         vad=Vad(args.vad_model),
@@ -78,6 +95,7 @@ def main() -> None:
             threshold=args.threshold, merge_threshold=args.merge_threshold
         ),
         asr=asr,
+        streaming=streaming,
         max_turn_seconds=args.max_turn,
         change_threshold=args.change_threshold,
     )
