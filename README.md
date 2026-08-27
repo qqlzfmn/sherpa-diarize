@@ -97,7 +97,20 @@ Web 可视化前端（需 `uv sync --extra web`）：
 
 ```bash
 uv run python3 examples/web/server.py --port 8000
-# 浏览器打开 http://localhost:8000：选音频与 ASR 模式，实时查看说话人时间轴与转写
+# 浏览器打开 http://localhost:8000
+```
+
+功能：三种音频源（示例音频 / 上传音频 / 浏览器录音）、说话人时间轴与转写实时渲染、
+流式 ASR 增量文本先灰后白（确认后转白）。音频在浏览器解码后经 WebSocket 逐块
+喂入服务端管线，事件实时推回。
+
+UI 截图检查（开发工具，需 playwright + chromium）：
+
+```bash
+uv sync --dev
+python3 -m playwright install chromium   # 无系统依赖时用 npm 镜像: PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+LD_LIBRARY_PATH=~/pw-libs .venv/bin/python3 examples/web/screenshot_ui.py --state done --out /tmp/ui.png
+# 截图后用 vision 模型检查 UI（需在 omp 配置 modelRoles.vision）
 ```
 
 ### 4. 示例输出
@@ -151,9 +164,10 @@ sherpa-diarize/
 ├── examples/
 │   ├── diarize_file.py      # 文件回放（实时模拟）
 │   ├── diarize_mic.py       # 麦克风实时
-│   └── web/                 # Web 可视化前端（FastAPI + WS）
+│   └── web/                 # Web 可视化前端（FastAPI + WS 二进制音频流，Vue3）
 │       ├── server.py
-│       └── static/index.html
+│       ├── screenshot_ui.py  # 无头浏览器截图（UI 检查）
+│       └── static/index.html, vue.global.prod.js
 ├── tests/                   # 单元测试（聚类逻辑、trim、长 turn 切分）
 └── pyproject.toml           # uv 工程
 ```
