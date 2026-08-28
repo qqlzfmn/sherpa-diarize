@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { session } from '../composables/session'
+import { t } from '../composables/i18n'
 import { fmtClock, fmtElapsed, fmtStamp } from '../utils/time'
 import { confPct, hexA, speakerColor, speakerLabel } from '../utils/speaker'
-import { MODE_LABELS } from '../types'
 
 interface SpkStat {
   id: number
@@ -27,7 +27,11 @@ const maxDur = computed(() => Math.max(...stats.value.map((s) => s.dur), 0))
 const elapsed = computed(() => (session.endedAt ? session.endedAt - session.startedAt : 0))
 
 const wsLabel = computed(() =>
-  session.wsConnected ? '已连接' : session.phase === 'connecting' ? '连接中' : '未连接',
+  session.wsConnected
+    ? t('side.connected')
+    : session.phase === 'connecting'
+      ? t('side.connecting')
+      : t('side.disconnected'),
 )
 </script>
 
@@ -35,10 +39,10 @@ const wsLabel = computed(() =>
   <aside class="side">
     <!-- 说话人统计 -->
     <section class="panel stats">
-      <h2 class="panel-title">说话人统计</h2>
+      <h2 class="panel-title">{{ t('side.title') }}</h2>
 
       <div v-if="!stats.length" class="s-empty">
-        {{ session.phase === 'processing' ? '分段生成中…' : '尚无说话人数据' }}
+        {{ session.phase === 'processing' ? t('side.genInProgress') : t('side.noData') }}
       </div>
 
       <ul v-else class="spk-list">
@@ -48,7 +52,7 @@ const wsLabel = computed(() =>
               <i class="chip-dot" :style="{ background: speakerColor(s.id) }" />
               {{ speakerLabel(s.id) }}
             </span>
-            <span class="spk-num mono">{{ s.count }} 段</span>
+            <span class="spk-num mono">{{ t('side.count', { n: s.count }) }}</span>
             <span class="spk-dur mono">{{ fmtClock(s.dur) }}</span>
             <span class="spk-pct mono">
               {{ totalSpeech ? Math.round((s.dur / totalSpeech) * 100) : 0 }}%
@@ -66,23 +70,23 @@ const wsLabel = computed(() =>
       </ul>
 
       <div v-if="stats.length" class="s-total">
-        有效语音共 <b class="mono">{{ fmtClock(totalSpeech) }}</b>
+        <span>{{ t('side.totalSpeech', { t: fmtClock(totalSpeech) }) }}</span>
         <span class="sep">·</span>
-        识别到 <b>{{ session.speakersTotal || stats.length }}</b> 位说话人
+        <span>{{ t('side.speakersFound', { n: session.speakersTotal || stats.length }) }}</span>
       </div>
     </section>
 
     <!-- 处理详情 -->
     <section class="panel detail">
-      <h2 class="panel-title">处理详情</h2>
+      <h2 class="panel-title">{{ t('side.detailTitle') }}</h2>
       <dl class="kv">
-        <div class="row"><dt>音频源</dt><dd>{{ session.sourceName || '—' }}</dd></div>
-        <div class="row"><dt>识别模式</dt><dd>{{ session.asrMode ? MODE_LABELS[session.asrMode] : '—' }}</dd></div>
-        <div class="row"><dt>连接状态</dt><dd class="mono">{{ wsLabel }}</dd></div>
-        <div class="row"><dt>已处理</dt><dd class="mono">{{ fmtClock(session.progress) }}</dd></div>
-        <div class="row"><dt>分段数</dt><dd class="mono">{{ session.turns.length }}</dd></div>
-        <div class="row"><dt>说话人数</dt><dd class="mono">{{ session.speakersTotal || '—' }}</dd></div>
-        <div class="row"><dt>处理耗时</dt><dd class="mono">{{ fmtElapsed(elapsed) }}</dd></div>
+        <div class="row"><dt>{{ t('side.source') }}</dt><dd>{{ session.sourceName || '—' }}</dd></div>
+        <div class="row"><dt>{{ t('side.mode') }}</dt><dd>{{ session.asrMode ? t(`mode.${session.asrMode}`) : '—' }}</dd></div>
+        <div class="row"><dt>{{ t('side.conn') }}</dt><dd class="mono">{{ wsLabel }}</dd></div>
+        <div class="row"><dt>{{ t('side.processed') }}</dt><dd class="mono">{{ fmtClock(session.progress) }}</dd></div>
+        <div class="row"><dt>{{ t('side.turns') }}</dt><dd class="mono">{{ session.turns.length }}</dd></div>
+        <div class="row"><dt>{{ t('side.speakers') }}</dt><dd class="mono">{{ session.speakersTotal || '—' }}</dd></div>
+        <div class="row"><dt>{{ t('side.duration') }}</dt><dd class="mono">{{ fmtElapsed(elapsed) }}</dd></div>
       </dl>
     </section>
   </aside>

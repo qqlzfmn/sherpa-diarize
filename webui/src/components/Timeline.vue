@@ -2,9 +2,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { session } from '../composables/session'
 import { playing, position, duration as playDuration } from '../composables/playback'
+import { t } from '../composables/i18n'
+import { theme } from '../composables/theme'
 import type { Turn } from '../types'
 import { fmtClock, fmtStamp } from '../utils/time'
-import { hexA, speakerColor, speakerLabel } from '../utils/speaker'
+import { hexA, speakerColor, speakerColorBright, speakerLabel } from '../utils/speaker'
 
 const props = defineProps<{ waveform: Float32Array | null }>()
 
@@ -69,7 +71,10 @@ function drawWave() {
   g.scale(dpr, dpr)
   const spp = wave.length / w // samples per pixel column
   const mid = h / 2
-  g.strokeStyle = 'rgba(150, 170, 210, 0.16)'
+  const waveColor =
+    getComputedStyle(document.documentElement).getPropertyValue('--wave-line').trim() ||
+    'rgba(150, 170, 210, 0.16)'
+  g.strokeStyle = waveColor
   g.lineWidth = 1
   g.beginPath()
   for (let x = 0; x < w; x++) {
@@ -128,6 +133,9 @@ watch(
   },
 )
 watch(contentW, () => drawWave())
+watch(theme, () => {
+  void nextTick(drawWave)
+})
 
 onMounted(() => {
   rafFollow()
@@ -143,15 +151,15 @@ onBeforeUnmount(() => {
 <template>
   <section ref="rootEl" class="timeline panel">
     <div class="t-head">
-      <h2 class="panel-title">说话人时间轴</h2>
-      <span class="hint">悬停分段查看详情</span>
+      <h2 class="panel-title">{{ t('timeline.title') }}</h2>
+      <span class="hint">{{ t('timeline.hint') }}</span>
       <div class="t-right">
         <span v-if="session.phase === 'processing'" class="live-tag">
-          <i class="pulse-dot" />实时处理中 · 已处理 {{ fmtClock(session.progress) }}
+          <i class="pulse-dot" />{{ t('timeline.live', { t: fmtClock(session.progress) }) }}
         </span>
         <label class="follow" :class="{ on: follow }">
           <input v-model="follow" type="checkbox" />
-          <span class="box" />自动跟随
+          <span class="box" />{{ t('timeline.follow') }}
         </label>
       </div>
     </div>
@@ -160,10 +168,10 @@ onBeforeUnmount(() => {
       <div class="t-inner" :style="{ width: contentW + 'px' }">
         <!-- 刻度 -->
         <div class="ruler">
-          <template v-for="(t, i) in ticks" :key="i">
-            <span class="tick" :class="{ major: t.label }" :style="{ left: t.pos + 'px' }" />
-            <span v-if="t.label" class="tick-label mono" :style="{ left: t.pos + 'px' }">
-              {{ t.label }}
+          <template v-for="(tk, i) in ticks" :key="i">
+            <span class="tick" :class="{ major: tk.label }" :style="{ left: tk.pos + 'px' }" />
+            <span v-if="tk.label" class="tick-label mono" :style="{ left: tk.pos + 'px' }">
+              {{ tk.label }}
             </span>
           </template>
         </div>
@@ -171,17 +179,17 @@ onBeforeUnmount(() => {
         <!-- 光谱带 -->
         <div class="lane">
           <canvas ref="canvasEl" class="wave" />
-          <div class="seg" v-for="t in session.turns" :key="t.id" :style="segStyle(t)"
-            @mousemove="onSegMove(t, $event)" @mouseleave="onSegLeave">
-            <span class="seg-chip" :style="{ color: speakerColor(t.speaker), borderColor: hexA(speakerColor(t.speaker), 0.5) }">
-              {{ speakerLabel(t.speaker) }}
+          <div class="seg" v-for="turn in session.turns" :key="turn.id" :style="segStyle(turn)"
+            @mousemove="onSegMove(turn, $event)" @mouseleave="onSegLeave">
+            <span class="seg-chip" :style="{ color: speakerColorBright(turn.speaker), borderColor: hexA(speakerColorBright(turn.speaker), 0.5) }">
+              {{ speakerLabel(turn.speaker) }}
             </span>
-            <span v-if="!t.text" class="seg-empty">（无语音）</span>
+            <span v-if="!turn.text" class="seg-empty">{{ t('timeline.noSpeech') }}</span>
           </div>
 
           <div v-if="!session.turns.length" class="lane-empty">
-            <span v-if="session.phase === 'processing'">正在分光识别…首个分段出现后将在此着色</span>
-            <span v-else>尚无分段 — 选择音频并开始处理后，说话人色带将出现在这里</span>
+            <span v-if="session.phase === 'processing'">{{ t('timeline.waiting') }}</span>
+            <span v-else>{{ t('timeline.empty') }}</span>
           </div>
 
           <!-- 游标 -->
@@ -200,9 +208,9 @@ onBeforeUnmount(() => {
           {{ speakerLabel(hover.turn.speaker) }}
         </span>
         <span class="tip-time mono">{{ fmtStamp(hover.turn.start) }} – {{ fmtStamp(hover.turn.end) }}</span>
-        <span class="tip-conf mono">置信 {{ Math.round(hover.turn.confidence * 100) }}%</span>
+        <span class="tip-conf mono">{{ t('common.confidence', { pct: Math.round(hover.turn.confidence * 100) }) }}</span>
       </div>
-      <p class="tip-text">{{ hover.turn.text || '（无语音内容）' }}</p>
+      <p class="tip-text">{{ hover.turn.text || t('timeline.noSpeechContent') }}</p>
     </div>
   </section>
 </template>
@@ -341,7 +349,7 @@ onBeforeUnmount(() => {
   height: 74px;
   border-top: 1px solid var(--line-1);
   border-bottom: 1px solid var(--line-1);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent);
+  background: linear-gradient(180deg, var(--lane-shade), transparent);
 }
 .wave {
   position: absolute;
@@ -358,12 +366,13 @@ onBeforeUnmount(() => {
   padding: 0 10px;
   border-left: 3px solid;
   border-radius: 8px;
+  box-shadow: var(--seg-ring);
   overflow: hidden;
   cursor: pointer;
   transition: filter 0.15s var(--ease);
 }
 .seg:hover {
-  filter: brightness(1.25);
+  filter: var(--seg-hover);
 }
 .seg-chip {
   font-size: 11px;
@@ -372,7 +381,7 @@ onBeforeUnmount(() => {
   padding: 1px 7px;
   border-radius: 99px;
   border: 1px solid;
-  background: rgba(7, 9, 13, 0.55);
+  background: var(--chip-bg);
 }
 .seg-empty {
   font-size: 10.5px;
@@ -407,7 +416,7 @@ onBeforeUnmount(() => {
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
   border-top: 7px solid var(--ink-hi);
-  filter: drop-shadow(0 0 4px rgba(233, 238, 248, 0.7));
+  filter: drop-shadow(0 0 4px var(--cursor-glow));
 }
 .line {
   position: absolute;
@@ -416,7 +425,7 @@ onBeforeUnmount(() => {
   left: 0;
   width: 2px;
   background: var(--ink-hi);
-  box-shadow: 0 0 10px rgba(233, 238, 248, 0.55);
+  box-shadow: 0 0 10px var(--cursor-shadow);
 }
 
 .tip {

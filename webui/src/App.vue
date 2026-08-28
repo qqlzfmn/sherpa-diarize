@@ -29,6 +29,7 @@ import {
   onAudioEnded,
 } from './composables/playback'
 import { micSeconds, startMic, stopMic } from './composables/mic'
+import { t } from './composables/i18n'
 import { CHUNK, TARGET_RATE, decodeAudio, toMono16k } from './utils/audio'
 import type { SourceKind } from './types'
 
@@ -103,7 +104,7 @@ async function onFileChange(e: Event) {
     waveform.value = samples16k.value
     session.error = null
   } catch {
-    session.error = '音频解码失败，请换用其他文件（支持 WAV / MP3 / FLAC 等）'
+    session.error = t('errors.decodeFailed')
     session.phase = 'error'
   }
 }
@@ -163,7 +164,7 @@ async function startSession() {
   session.error = null
   try {
     if (sourceKind.value === 'mic') {
-      await begin(session.asrMode, 'mic', '麦克风录音')
+      await begin(session.asrMode, 'mic', t('source.micName'))
       micQueue = []
       await startMic((c) => micQueue.push(c))
       micTimer = window.setInterval(flushMic, 150)
@@ -186,18 +187,18 @@ async function startSession() {
 
 async function loadFileSource() {
   const url = demoUrl.value
-  if (!url) throw new Error('请先选择示例音频')
+  if (!url) throw new Error(t('errors.needDemo'))
   const res = await fetch(url)
-  if (!res.ok) throw new Error('示例音频加载失败')
+  if (!res.ok) throw new Error(t('errors.demoLoadFailed'))
   const buf = await decodeAudio(await res.arrayBuffer())
   samples16k.value = toMono16k(buf)
   waveform.value = samples16k.value
 }
 
 function sourceName(): string {
-  if (sourceKind.value === 'mic') return '麦克风录音'
-  if (sourceKind.value === 'upload') return uploadName.value || '上传音频'
-  return demoName.value || '示例音频'
+  if (sourceKind.value === 'mic') return t('source.micName')
+  if (sourceKind.value === 'upload') return uploadName.value || t('source.uploadFallback')
+  return demoName.value || t('source.demoFallback')
 }
 
 function stopMicRecording() {
@@ -264,7 +265,7 @@ watch(
 
 onMounted(() => {
   void fetchModels().catch(() => {
-    banner.value = '无法获取模型状态（/api/models）— 请确认后端已在 8000 端口运行'
+    banner.value = t('errors.modelsFetch')
   })
 })
 

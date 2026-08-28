@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { Phase, SourceKind } from '../types'
 import { fmtClock } from '../utils/time'
+import { t } from '../composables/i18n'
 
 const props = defineProps<{
   phase: Phase
@@ -27,7 +28,7 @@ const enabled = computed(
 const pct = computed(() =>
   props.duration > 0 ? Math.min(100, (props.position / props.duration) * 100) : 0,
 )
-const rateLabel = (r: number) => (r === 4 ? '最快' : `${r}×`)
+const rateLabel = (r: number) => (r === 4 ? t('transport.fastest') : `${r}×`)
 </script>
 
 <template>
@@ -35,7 +36,7 @@ const rateLabel = (r: number) => (r === 4 ? '最快' : `${r}×`)
     <button
       class="t-btn play"
       :disabled="!enabled"
-      :title="playing ? '暂停' : '播放'"
+      :title="playing ? t('transport.pause') : t('transport.play')"
       @click="emit('toggle')"
     >
       <svg v-if="playing" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
@@ -46,13 +47,13 @@ const rateLabel = (r: number) => (r === 4 ? '最快' : `${r}×`)
         <path d="M4.6 2.4 L13.4 8 L4.6 13.6 Z" fill="currentColor" />
       </svg>
     </button>
-    <button class="t-btn" :disabled="!enabled || phase === 'processing'" title="回到开头" @click="emit('stop')">
+    <button class="t-btn" :disabled="!enabled || phase === 'processing'" :title="t('transport.backToStart')" @click="emit('stop')">
       <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
         <path d="M3 2.5 v11 h2 v-11 Z M13 13.5 L5.5 8 L13 2.5 Z" fill="currentColor" />
       </svg>
     </button>
 
-    <div class="rates" role="group" aria-label="倍速">
+    <div class="rates" role="group" :aria-label="t('transport.rates')">
       <button
         v-for="r in RATES"
         :key="r"

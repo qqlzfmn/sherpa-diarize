@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { Phase, SourceKind } from '../types'
 import { fmtClock } from '../utils/time'
+import { t } from '../composables/i18n'
 
 const props = defineProps<{
   phase: Phase
@@ -28,29 +29,29 @@ const busy = computed(() => props.phase === 'connecting' || props.phase === 'pro
 const primaryLabel = computed(() => {
   switch (props.phase) {
     case 'connecting':
-      return '连接中…'
+      return t('action.connecting')
     case 'processing':
-      return props.kind === 'mic' ? '停止录音' : '中止'
+      return props.kind === 'mic' ? t('action.stopRecording') : t('action.abort')
     case 'done':
-      return '重新开始'
+      return t('action.restart')
     case 'error':
-      return '重试'
+      return t('action.retry')
     default:
-      return '开始处理'
+      return t('action.start')
   }
 })
 </script>
 
 <template>
   <div class="srcbar">
-    <div class="tabs" role="tablist" aria-label="音频来源">
+    <div class="tabs" role="tablist" :aria-label="t('source.tabsLabel')">
       <button
         class="tab"
         :class="{ on: kind === 'demo' }"
         :disabled="busy"
         @click="emit('pick-demo')"
       >
-        示例音频
+        {{ t('source.demo') }}
       </button>
       <button
         class="tab"
@@ -58,7 +59,7 @@ const primaryLabel = computed(() => {
         :disabled="busy"
         @click="emit('pick-upload')"
       >
-        上传
+        {{ t('source.upload') }}
       </button>
       <button
         class="tab"
@@ -66,7 +67,7 @@ const primaryLabel = computed(() => {
         :disabled="busy"
         @click="emit('pick-mic')"
       >
-        录音
+        {{ t('source.mic') }}
       </button>
     </div>
 
@@ -80,7 +81,7 @@ const primaryLabel = computed(() => {
           @change="emit('demo', ($event.target as HTMLSelectElement).value)"
         >
           <option value="" disabled>
-            {{ demoOptions.length ? '选择示例音频…' : '暂无示例音频' }}
+            {{ demoOptions.length ? t('source.placeholder') : t('source.noDemo') }}
           </option>
           <option v-for="o in demoOptions" :key="o.url" :value="o.url">{{ o.name }}</option>
         </select>
@@ -90,7 +91,7 @@ const primaryLabel = computed(() => {
       <!-- 上传 -->
       <div v-else-if="kind === 'upload'" class="field">
         <label class="file-btn" :class="{ disabled: busy }">
-          选择文件
+          {{ t('source.chooseFile') }}
           <input
             type="file"
             accept="audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac"
@@ -99,7 +100,7 @@ const primaryLabel = computed(() => {
           />
         </label>
         <span class="note" :class="{ 'note-dim': !uploadName }">
-          {{ uploadName || '支持 WAV / MP3 / FLAC 等，自动转 16k 单声道' }}
+          {{ uploadName || t('source.fileHint') }}
         </span>
       </div>
 
@@ -107,7 +108,7 @@ const primaryLabel = computed(() => {
       <div v-else class="field">
         <span class="mic-hint">
           <i class="mic-dot" :class="{ live: phase === 'processing' }" />
-          浏览器麦克风 · 16k 实时采集
+          {{ t('source.micHint') }}
         </span>
         <span v-if="phase === 'processing'" class="mic-timer mono">{{ fmtClock(micSeconds) }}</span>
       </div>

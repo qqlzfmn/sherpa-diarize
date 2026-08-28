@@ -1,21 +1,22 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Phase } from '../types'
+import { t } from '../composables/i18n'
 
 const props = defineProps<{ phase: Phase }>()
 
 const view = computed(() => {
   switch (props.phase) {
     case 'connecting':
-      return { label: '连接中', cls: 'connecting' }
+      return { label: t('status.connecting'), cls: 'connecting' }
     case 'processing':
-      return { label: '处理中', cls: 'processing' }
+      return { label: t('status.processing'), cls: 'processing' }
     case 'done':
-      return { label: '完成', cls: 'done' }
+      return { label: t('status.done'), cls: 'done' }
     case 'error':
-      return { label: '错误', cls: 'error' }
+      return { label: t('status.error'), cls: 'error' }
     default:
-      return { label: '待机', cls: 'idle' }
+      return { label: t('status.idle'), cls: 'idle' }
   }
 })
 </script>

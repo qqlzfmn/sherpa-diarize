@@ -4,6 +4,7 @@
  */
 import { reactive } from 'vue'
 import type { AsrMode, ModelsInfo, Phase, ServerMessage, SourceKind, Turn } from '../types'
+import { t } from './i18n'
 
 export const session = reactive({
   phase: 'idle' as Phase,
@@ -89,7 +90,7 @@ function handleMessage(raw: string) {
 
 export async function fetchModels(): Promise<ModelsInfo> {
   const res = await fetch('/api/models')
-  if (!res.ok) throw new Error(`模型探测失败 (HTTP ${res.status})`)
+  if (!res.ok) throw new Error(t('session.modelsFail', { status: res.status }))
   const data = (await res.json()) as ModelsInfo
   session.models = data
   return data
@@ -109,8 +110,8 @@ export function begin(mode: AsrMode, kind: SourceKind, name: string): Promise<vo
     try {
       socket = new WebSocket(wsUrl())
     } catch (e) {
-      failSession(e instanceof Error ? e : new Error('无法创建 WebSocket'))
-      reject(e instanceof Error ? e : new Error('无法创建 WebSocket'))
+      failSession(e instanceof Error ? e : new Error(t('session.wsCreate')))
+      reject(e instanceof Error ? e : new Error(t('session.wsCreate')))
       return
     }
     ws = socket
@@ -122,7 +123,7 @@ export function begin(mode: AsrMode, kind: SourceKind, name: string): Promise<vo
       const f = settle.fail
       settle = null
       closeWs()
-      f(new Error('连接后端超时'))
+      f(new Error(t('session.wsTimeout')))
     }, 20000)
 
     settle = {
@@ -147,7 +148,7 @@ export function begin(mode: AsrMode, kind: SourceKind, name: string): Promise<vo
       if (settle) {
         const f = settle.fail
         settle = null
-        f(new Error('无法连接后端服务'))
+        f(new Error(t('session.wsConnectFail')))
       }
     }
     socket.onclose = () => {
@@ -156,9 +157,9 @@ export function begin(mode: AsrMode, kind: SourceKind, name: string): Promise<vo
       if (settle) {
         const f = settle.fail
         settle = null
-        f(new Error('连接意外关闭'))
+        f(new Error(t('session.wsClosed')))
       } else if (session.phase === 'processing') {
-        failSession(new Error('与后端的连接中断'))
+        failSession(new Error(t('session.wsBroken')))
       }
     }
   })

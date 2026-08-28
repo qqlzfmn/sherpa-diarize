@@ -4,6 +4,8 @@ On-Device Real-time Streaming Speaker Diarization based on [Sherpa-onnx](https:/
 
 端侧实时流式说话人分离（"谁在什么时候说话"），构建于 sherpa-onnx 之上，纯 CPU / 端侧可跑。
 
+[English](README.en.md)
+
 ## 目标
 
 - **实时流式**：按音频块（chunk）增量处理，说话人切换事件低延迟产出，不依赖整段录音。

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import { session } from '../composables/session'
+import { t } from '../composables/i18n'
 import { fmtStamp } from '../utils/time'
 import { confPct, hexA, speakerColor, speakerLabel } from '../utils/speaker'
 
@@ -20,11 +21,11 @@ watch(
 const modeName = () => {
   switch (session.asrMode) {
     case 'streaming':
-      return '流式识别'
+      return t('transcript.streaming')
     case 'offline':
-      return '离线转写'
+      return t('transcript.offline')
     default:
-      return '仅分离'
+      return t('transcript.diarizeOnly')
   }
 }
 </script>
@@ -32,11 +33,11 @@ const modeName = () => {
 <template>
   <section class="transcript panel">
     <div class="tr-head">
-      <h2 class="panel-title">转写</h2>
+      <h2 class="panel-title">{{ t('transcript.title') }}</h2>
       <span class="mode-tag">{{ modeName() }}</span>
-      <span class="count mono">{{ session.turns.length }} 段</span>
+      <span class="count mono">{{ t('transcript.count', { n: session.turns.length }) }}</span>
       <span v-if="session.phase === 'processing'" class="live">
-        <i class="pulse-dot" />实时
+        <i class="pulse-dot" />{{ t('transcript.live') }}
       </span>
     </div>
 
@@ -47,34 +48,32 @@ const modeName = () => {
           <i /><i /><i />
         </div>
         <p class="empty-title">
-          {{ session.phase === 'done' ? '未识别到语音分段' : '转写将在这里逐句呈现' }}
+          {{ session.phase === 'done' ? t('transcript.emptyDone') : t('transcript.emptyIdle') }}
         </p>
         <p class="empty-sub">
           {{
-            session.phase === 'done'
-              ? '音频中可能没有清晰的人声，或 VAD 未命中。'
-              : '流式模式下会先出现灰度预览，定型后转为正式文本。'
+            session.phase === 'done' ? t('transcript.emptySubDone') : t('transcript.emptySubIdle')
           }}
         </p>
       </div>
 
       <!-- turn 行 -->
       <article
-        v-for="t in session.turns"
-        :key="t.id"
+        v-for="turn in session.turns"
+        :key="turn.id"
         class="turn-row"
-        :style="{ '--spk': speakerColor(t.speaker) }"
+        :style="{ '--spk': speakerColor(turn.speaker) }"
       >
         <div class="rail" />
         <div class="body">
           <div class="meta">
-            <span class="time mono">{{ fmtStamp(t.start) }} – {{ fmtStamp(t.end) }}</span>
-            <span class="spk" :style="{ color: speakerColor(t.speaker) }">
-              {{ speakerLabel(t.speaker) }}
+            <span class="time mono">{{ fmtStamp(turn.start) }} – {{ fmtStamp(turn.end) }}</span>
+            <span class="spk" :style="{ color: speakerColor(turn.speaker) }">
+              {{ speakerLabel(turn.speaker) }}
             </span>
-            <span class="conf mono">置信 {{ confPct(t.confidence) }}</span>
+            <span class="conf mono">{{ t('common.confidence', { pct: confPct(turn.confidence) }) }}</span>
           </div>
-          <p class="text">{{ t.text || '（无语音内容）' }}</p>
+          <p class="text">{{ turn.text || t('transcript.noSpeech') }}</p>
         </div>
       </article>
 
@@ -83,15 +82,15 @@ const modeName = () => {
         <div class="rail" />
         <div class="body">
           <div class="meta">
-            <span class="ghost-tag"><i class="pulse-dot" />识别中</span>
-            <span class="ghost-hint">文本尚未定型，最终结果到达后自动转为正式条目</span>
+            <span class="ghost-tag"><i class="pulse-dot" />{{ t('transcript.recognizing') }}</span>
+            <span class="ghost-hint">{{ t('transcript.partialHint') }}</span>
           </div>
           <p class="text ghost-text">{{ session.partial }}<span class="caret" /></p>
         </div>
       </div>
 
       <div v-if="session.phase === 'done' && session.turns.length" class="done-line">
-        <i class="ok-dot" />全部完成 — 共识别 {{ session.speakersTotal }} 位说话人
+        <i class="ok-dot" />{{ t('transcript.done', { n: session.speakersTotal }) }}
       </div>
     </div>
   </section>

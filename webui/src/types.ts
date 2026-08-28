@@ -39,9 +39,3 @@ export type ServerMessage =
   | { type: 'progress'; t: number }
   | { type: 'done'; speakers: number }
   | { type: 'error'; message: string }
-
-export const MODE_LABELS: Record<AsrMode, string> = {
-  none: '无 ASR',
-  offline: '离线转写',
-  streaming: '流式转写',
-}
