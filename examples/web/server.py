@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from sherpa_diarize import (
@@ -47,14 +47,22 @@ WEBUI_DIST = ROOT / "webui" / "dist"
 
 app = FastAPI()
 app.mount("/models", StaticFiles(directory=models_dir), name="models")
-if not WEBUI_DIST.is_dir():
-    raise SystemExit("缺少前端构建产物，请先执行: cd webui && npm install && npm run build")
-app.mount("/assets", StaticFiles(directory=WEBUI_DIST / "assets"), name="assets")
+
+if WEBUI_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=WEBUI_DIST / "assets"), name="assets")
+    index_file = WEBUI_DIST / "index.html"
+else:
+    index_file = None  # 前端未构建：根路径返回提示
 
 
 @app.get("/")
 async def index():
-    return FileResponse(WEBUI_DIST / "index.html")
+    if index_file is None:
+        return HTMLResponse(
+            "<h2>前端未构建</h2><p>请先执行: cd webui && npm install && npm run build，然后刷新本页。</p>",
+            status_code=503,
+        )
+    return FileResponse(index_file)
 
 
 def _model_paths() -> dict:
