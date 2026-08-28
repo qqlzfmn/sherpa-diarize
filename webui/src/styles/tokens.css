@@ -1,0 +1,32 @@
+/* ============ 声分 · 设计令牌 ============ */
+:root {
+  /* 基底 —— 录音棚暗房 */
+  --bg-0: #07090d;
+  --bg-1: #0c1017;
+  --bg-2: #111826;
+  --bg-3: #1a2334;
+
+  /* 描边 / 墨色 */
+  --line-1: rgba(142, 160, 200, 0.1);
+  --line-2: rgba(142, 160, 200, 0.2);
+  --ink-hi: #e9eef8;
+  --ink-mid: #9aa7c0;
+  --ink-low: #5d6b86;
+
+  /* 语义色 */
+  --accent: #5aa2ff;
+  --accent-soft: rgba(90, 162, 255, 0.14);
+  --good: #3ecf8e;
+  --warn: #ffd166;
+  --bad: #ff6b81;
+
+  /* 形状与字体 */
+  --radius: 14px;
+  --radius-sm: 9px;
+  --font-ui: 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', -apple-system,
+    'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Consolas,
+    'Courier New', monospace;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.38);
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}

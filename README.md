@@ -170,8 +170,9 @@ sherpa-diarize/
 │   └── web/                 # Web 后端（FastAPI + WS 二进制音频流）
 │       ├── server.py
 │       └── screenshot_ui.py  # 无头浏览器截图（UI 检查）
-├── webui/                   # Web 前端（Vite + Vue3 + TS）
-│   ├── src/components/       # TopBar / SourcePanel / Timeline / Transcript / StatusBar
+├── webui/                   # Web 前端（Vite + Vue3 + TS，"声分"设计）
+│   ├── src/components/       # AppHeader / SourceBar / TransportBar / Timeline / Transcript / SidePanel / StatusChip
+│   ├── src/composables/      # session（WS）/ playback（播放）/ mic（录音）
 │   └── dist/                 # 构建产物（npm run build，git 忽略）
 ├── tests/                   # 单元测试（聚类逻辑、trim、长 turn 切分）
 └── pyproject.toml           # uv 工程
