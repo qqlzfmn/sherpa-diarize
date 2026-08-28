@@ -213,6 +213,7 @@ const modeName = () => {
 
 .turn-row {
   display: flex;
+  flex-shrink: 0; /* 保持行高，分段多时由 .tr-list 滚动而非压缩 */
   border-radius: var(--radius-sm);
   border: 1px solid var(--line-1);
   background: var(--bg-2);
@@ -315,6 +316,7 @@ const modeName = () => {
 
 .done-line {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 8px;
   padding: 10px 6px 2px;
