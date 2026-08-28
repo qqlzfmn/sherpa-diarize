@@ -43,15 +43,18 @@ from sherpa_diarize import (
 ROOT = Path(__file__).resolve().parent.parent.parent
 SAMPLE_RATE = 16000
 models_dir = ROOT / "models"  # main() 可覆盖
+WEBUI_DIST = ROOT / "webui" / "dist"
 
 app = FastAPI()
-app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
-app.mount("/models", StaticFiles(directory=Path(__file__).parent.parent.parent / "models"), name="models")
+app.mount("/models", StaticFiles(directory=models_dir), name="models")
+if not WEBUI_DIST.is_dir():
+    raise SystemExit("缺少前端构建产物，请先执行: cd webui && npm install && npm run build")
+app.mount("/assets", StaticFiles(directory=WEBUI_DIST / "assets"), name="assets")
 
 
 @app.get("/")
 async def index():
-    return FileResponse(Path(__file__).parent / "static" / "index.html")
+    return FileResponse(WEBUI_DIST / "index.html")
 
 
 def _model_paths() -> dict:

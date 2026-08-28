@@ -4,3 +4,5 @@ __pycache__/
 models/
 results/
 *.onnx
+webui/node_modules/
+webui/dist/

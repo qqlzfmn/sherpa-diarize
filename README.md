@@ -93,24 +93,27 @@ python3 examples/diarize_mic.py \
     --asr-tokens models/sherpa-onnx-streaming-zipformer-ctc-multi-zh-hans-int8-2023-12-13/tokens.txt
 ```
 
-Web 可视化前端（需 `uv sync --extra web`）：
+Web 可视化前端（全新 Vite + Vue3 + TS 工程，`webui/`）：
 
 ```bash
-uv run python3 examples/web/server.py --port 8000
-# 浏览器打开 http://localhost:8000
+# 开发（vite dev，proxy 到后端 8000）
+uv run python3 examples/web/server.py --port 8000   # 后端（终端 1）
+cd webui && npm install && npm run dev               # 前端（终端 2，http://localhost:5173）
+
+# 生产（构建后由后端同源服务）
+cd webui && npm run build
+uv run python3 examples/web/server.py --port 8000    # 直接打开 http://localhost:8000
 ```
 
-功能：三种音频源（示例音频 / 上传音频 / 浏览器录音）、说话人时间轴与转写实时渲染、
-流式 ASR 增量文本先灰后白（确认后转白）。音频在浏览器解码后经 WebSocket 逐块
-喂入服务端管线，事件实时推回。
+功能：三种音频源（示例 / 上传 / 浏览器录音）、canvas 说话人时间轴（彩色分段 + 刻度 + 游标 + hover 详情 + 自动跟随）、转写面板（流式 partial 灰色呼吸 → final 平滑转白）、说话人统计、倍速控制、响应式布局。音频在浏览器解码为 16kHz Float32 后经 WebSocket 二进制逐块喂入后端管线。
 
 UI 截图检查（开发工具，需 playwright + chromium）：
 
 ```bash
 uv sync --dev
-python3 -m playwright install chromium   # 无系统依赖时用 npm 镜像: PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+python3 -m playwright install chromium
 LD_LIBRARY_PATH=~/pw-libs .venv/bin/python3 examples/web/screenshot_ui.py --state done --out /tmp/ui.png
-# 截图后用 vision 模型检查 UI（需在 omp 配置 modelRoles.vision）
+# 截图后用 vision 模型检查（需在 omp 配置 modelRoles.vision，重启会话生效）
 ```
 
 ### 4. 示例输出
@@ -164,10 +167,12 @@ sherpa-diarize/
 ├── examples/
 │   ├── diarize_file.py      # 文件回放（实时模拟）
 │   ├── diarize_mic.py       # 麦克风实时
-│   └── web/                 # Web 可视化前端（FastAPI + WS 二进制音频流，Vue3）
+│   └── web/                 # Web 后端（FastAPI + WS 二进制音频流）
 │       ├── server.py
-│       ├── screenshot_ui.py  # 无头浏览器截图（UI 检查）
-│       └── static/index.html, vue.global.prod.js
+│       └── screenshot_ui.py  # 无头浏览器截图（UI 检查）
+├── webui/                   # Web 前端（Vite + Vue3 + TS）
+│   ├── src/components/       # TopBar / SourcePanel / Timeline / Transcript / StatusBar
+│   └── dist/                 # 构建产物（npm run build，git 忽略）
 ├── tests/                   # 单元测试（聚类逻辑、trim、长 turn 切分）
 └── pyproject.toml           # uv 工程
 ```
