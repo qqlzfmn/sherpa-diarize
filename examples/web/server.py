@@ -118,14 +118,19 @@ async def ws_endpoint(ws: WebSocket):
     n_events = 0
 
     async def sender():
-        while True:
-            msg = await outq.get()
-            await ws.send_json(msg)
+        try:
+            while True:
+                msg = await outq.get()
+                await ws.send_json(msg)
+        except Exception:  # noqa: S110, BLE001 — 连接断开时 send 失败，任务退出即可
+            pass
 
     sender_task = asyncio.create_task(sender())
     try:
         while True:
             msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break  # 客户端断开，不能再调用 receive()
             if msg.get("type") != "websocket.receive":
                 continue
             if "text" in msg:
