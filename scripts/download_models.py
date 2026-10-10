@@ -83,12 +83,12 @@ def _https_opener() -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
 
 
-def download(url: str, dest: Path, description: str) -> None:
+def download(kind: str, url: str, dest: Path, description: str) -> None:
     if dest.exists():
         print(f"[skip] {dest.name} 已存在")
         return
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".part")
+    tmp = dest.with_name(dest.name + ".part")
     print(f"[下载] {description}: {url}")
     try:
         with _https_opener().open(url, timeout=300) as resp, open(tmp, "wb") as f:
@@ -104,7 +104,7 @@ def download(url: str, dest: Path, description: str) -> None:
                     pct = done / total * 100
                     print(f"\r  {done / 1e6:.1f}/{total / 1e6:.1f} MB ({pct:.0f}%)", end="")
         print()
-        if dest.suffix == ".tar.bz2":
+        if kind == "dir":
             import tarfile
 
             with tarfile.open(tmp, "r:bz2") as tf:
@@ -151,7 +151,7 @@ def main() -> None:
         jobs = [VAD_MODEL, EMBEDDING_MODEL, ASR_MODEL, STREAMING_ASR_MODEL, DEMO_AUDIO]
 
     for kind, name, url, desc in jobs:
-        download(prefix + url, MODELS_DIR / name, desc)
+        download(kind, prefix + url, MODELS_DIR / name, desc)
 
 
 if __name__ == "__main__":
